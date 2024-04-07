@@ -55,16 +55,13 @@ public class FileManager {
 		replicafiles = new BigInteger[N];
 		this.chordnode = chordnode;
 	}
-	
+
 	public void createReplicaFiles() {
-	 	
-		// set a loop where size = numReplicas
-		
-		// replicate by adding the index to filename
-		
-		// hash the replica
-		
-		// store the hash in the replicafiles array.
+		for (int index = 0; index < Util.numReplicas; index++) {
+			String filenameWithIndex = filename + index;
+			BigInteger hashValue = Hash.hashOf(filenameWithIndex);
+			replicafiles[index] = hashValue;
+		}
 	}
 	
     /**
