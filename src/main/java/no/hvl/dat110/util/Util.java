@@ -37,12 +37,16 @@ public class Util {
 	 * @return true if (lower <= id <= upper) or false otherwise
 	 */
 	public static boolean checkInterval(BigInteger id, BigInteger lower, BigInteger upper) {
-		if (lower.compareTo(upper) > 0) {
-			throw new IllegalArgumentException("Invalid interval: lower bound is greater than upper bound");
+		// Check if lower <= upper
+		if (lower.compareTo(upper) <= 0) {
+			return id.compareTo(lower) >= 0 && id.compareTo(upper) <= 0;
+		} else {
+			// Case when interval wraps around (e.g., 9 lies between 6 and 2 in mod 10)
+			// We need to check if id is between lower and the maximum id, or between the minimum id and upper
+			return id.compareTo(lower) >= 0 || id.compareTo(upper) <= 0;
 		}
-
-		return lower.compareTo(id) < 0 && id.compareTo(upper) <= 0;
 	}
+
 
 
 	public static List<String> toString(List<NodeInterface> list) throws RemoteException {
