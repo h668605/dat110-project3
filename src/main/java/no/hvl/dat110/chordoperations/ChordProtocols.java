@@ -176,8 +176,7 @@ public class ChordProtocols {
 
 			// check that succnode is not null, then add it to the finger table
 			for (int i= 0; i< size; i++){
-				BigInteger k = chordnode.getNodeID().add(BigInteger.valueOf(2)).mod(addressSize).modPow(BigInteger.valueOf(i), addressSize);
-
+				BigInteger k = chordnode.findSuccessor(chordnode.getNodeID().add(BigInteger.valueOf(2).pow(i))).getNodeID().mod(addressSize);
 				NodeInterface succnode = chordnode.findSuccessor(k);
 				if (succnode != null) {
 					fingerTable.add(succnode);
