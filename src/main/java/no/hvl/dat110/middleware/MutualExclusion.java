@@ -1,5 +1,5 @@
 /**
- * 
+ *
  */
 package no.hvl.dat110.middleware;
 
@@ -21,72 +21,76 @@ import no.hvl.dat110.util.Util;
  *
  */
 public class MutualExclusion {
-		
+
 	private static final Logger logger = LogManager.getLogger(MutualExclusion.class);
 	/** lock variables */
 	private boolean CS_BUSY = false;						// indicate to be in critical section (accessing a shared resource) 
 	private boolean WANTS_TO_ENTER_CS = false;				// indicate to want to enter CS
 	private List<Message> queueack; 						// queue for acknowledged messages
 	private List<Message> mutexqueue;						// queue for storing process that are denied permission. We really don't need this for quorum-protocol
-	
+
 	private LamportClock clock;								// lamport clock
 	private Node node;
-	
+
 	public MutualExclusion(Node node) throws RemoteException {
 		this.node = node;
-		
+
 		clock = new LamportClock();
 		queueack = new ArrayList<Message>();
 		mutexqueue = new ArrayList<Message>();
 	}
-	
+
 	public synchronized void acquireLock() {
 		CS_BUSY = true;
 	}
-	
+
 	public void releaseLocks() {
 		WANTS_TO_ENTER_CS = false;
 		CS_BUSY = false;
 	}
 
 	public boolean doMutexRequest(Message message, byte[] updates) throws RemoteException {
-		
+		// Log that the node wants to access the critical section
 		logger.info(node.nodename + " wants to access CS");
-		// clear the queueack before requesting for votes
+
+		// Clear the queues before starting the mutual exclusion algorithm
 		queueack.clear();
-		// clear the mutexqueue
 		mutexqueue.clear();
-		// increment clock
+
+		// Increment the Lamport clock
 		clock.increment();
-		// adjust the clock on the message, by calling the setClock on the message
+
+		// Set the clock on the message
 		message.setClock(clock.getClock());
-		// wants to access resource - set the appropriate lock variable
+
+		// Indicate that the node wants to access the resource
 		WANTS_TO_ENTER_CS = true;
-		
-		// start MutualExclusion algorithm
-		
-			// first, call removeDuplicatePeersBeforeVoting. A peer can hold/contain 2 replicas of a file. This peer will appear twice
-		List<Message> uniquePeers = removeDuplicatePeersBeforeVoting();
-			// multicast the message to activenodes (hint: use multicastMessage)
-		multicastMessage(message, uniquePeers);
-			// check that all replicas have replied (permission) - areAllMessagesReturned(int numvoters)?
-		if (areAllMessagesReturned(uniquePeers.size())) {
-			// Acquire lock
+
+		// Remove duplicates from the list of active nodes
+		List<Message> uniqueActiveNodes = removeDuplicatePeersBeforeVoting();
+
+		// Multicast the message to the active nodes
+		multicastMessage(message, uniqueActiveNodes);
+
+		// Wait for acknowledgements from all active nodes
+		if (areAllMessagesReturned(uniqueActiveNodes.size())) {
+			// Acquire the lock
 			acquireLock();
 
-			// Send updates to all replicas
+			// Broadcast updates to all peers
 			node.broadcastUpdatetoPeers(updates);
 
 			// Clear the mutexqueue
 			mutexqueue.clear();
 
-			// Return permission
+			// Return permission to enter the critical section
 			return true;
 		}
-		
+
+		// Permission to enter the critical section was denied
 		return false;
 	}
-	
+
 	// multicast message to other processes including self
 	private void multicastMessage(Message message, List<Message> activenodes) throws RemoteException {
 		logger.info("Number of peers to vote = " + activenodes.size());
@@ -104,41 +108,16 @@ public class MutualExclusion {
 			}
 		}
 	}
-
-
 	public void onMutexRequestReceived(Message message) throws RemoteException {
-		
-		// increment the local clock
-		clock.increment();
 		// if message is from self, acknowledge, and call onMutexAcknowledgementReceived()
-			if(message.getNodeName().equals(node.nodename)){
-				logger.info("Received mutex request from self. Acknowledging...");
-				onMutexAcknowledgementReceived(message);
-				return;
-			}
-		int caseid = -1;
-
-		if (!CS_BUSY && !WANTS_TO_ENTER_CS) {
-			// Case 0: Receiver is not accessing shared resource and does not want to
-			caseid = 0;
-		} else if (CS_BUSY || WANTS_TO_ENTER_CS) {
-			// Case 1: Receiver already has access to the resource
-			caseid = 1;
-		} else {
-			// Case 2: Receiver wants to access resource but is yet to
-			// Compare own message clock to received message's clock
-			if (clock.getClock() < message.getClock() || (clock.getClock() == message.getClock() && node.nodename.compareTo(message.getNodeName()) < 0)) {
-				caseid = 2;
-			} else {
-				// Queue the request if receiver's clock is ahead or equal but has a higher node name
-				mutexqueue.add(message);
-				logger.info("Added request from " + message.getNodeName() + " to mutex queue.");
-				return;
-			}
+		if (message.getNodeName().equals(node.nodename)) {
+			message.setAcknowledged(true);
+			onMutexAcknowledgementReceived(message);
 		}
 
-		// Call decision algorithm
-		doDecisionAlgorithm(message, mutexqueue, caseid);
+		int decisionCase = (!CS_BUSY && !WANTS_TO_ENTER_CS) ? 0 : CS_BUSY ? 1 : 2;
+
+		doDecisionAlgorithm(message, mutexqueue, decisionCase);
 	}
 
 	public void doDecisionAlgorithm(Message message, List<Message> queue, int condition) throws RemoteException {
@@ -190,13 +169,10 @@ public class MutualExclusion {
 		}
 	}
 
-
 	public void onMutexAcknowledgementReceived(Message message) throws RemoteException {
-		// Add message to queueack
+		// add message to queueack
 		queueack.add(message);
-		logger.info("Acknowledgement received from " + message.getNodeName());
 	}
-
 
 	// multicast release locks message to other processes including self
 	public void multicastReleaseLocks(Set<Message> activenodes) {
@@ -217,35 +193,31 @@ public class MutualExclusion {
 		}
 	}
 
+	private boolean areAllMessagesReturned(int numVoters) throws RemoteException {
+		logger.info(node.getNodeName() + ": size of queueack = " + queueack.size());
 
-	private boolean areAllMessagesReturned(int numvoters) throws RemoteException {
-		logger.info(node.getNodeName()+": size of queueack = "+queueack.size());
-
-		// check if the size of the queueack is the same as the numvoters
+		// check if the size of the queueack is same as the numVoters
 		// clear the queueack
 		// return true if yes and false if no
-		if(queueack.size() == numvoters){
+		if (queueack.size() == numVoters) {
 			queueack.clear();
 			return true;
 		}
+
 		return false;
 	}
 
-
 	private List<Message> removeDuplicatePeersBeforeVoting() {
-		
-		List<Message> uniquepeer = new ArrayList<Message>();
-		for(Message p : node.activenodesforfile) {
-			boolean found = false;
-			for(Message p1 : uniquepeer) {
-				if(p.getNodeName().equals(p1.getNodeName())) {
-					found = true;
-					break;
-				}
+		List<Message> uniquePeer = new ArrayList<>();
+
+		// iterate over active nodes for file
+		for (Message p : node.activenodesforfile) {
+			// check if node is already in uniquePeer list
+			if (uniquePeer.stream().noneMatch(p1 -> p.getNodeName().equals(p1.getNodeName()))) {
+				uniquePeer.add(p);
 			}
-			if(!found)
-				uniquepeer.add(p);
-		}		
-		return uniquepeer;
+		}
+
+		return uniquePeer;
 	}
 }
